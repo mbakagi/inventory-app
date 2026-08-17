@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:excel/excel.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
@@ -40,7 +41,7 @@ class CatalogLoader {
 
     try {
       List<int> bytes;
-      if (_sourcePath.isNotEmpty && File(_sourcePath).existsSync()) {
+      if (!kIsWeb && _sourcePath.isNotEmpty && File(_sourcePath).existsSync()) {
         bytes = File(_sourcePath).readAsBytesSync();
       } else {
         bytes = (await rootBundle.load(_assetPath)).buffer.asUint8List();
@@ -64,6 +65,7 @@ class CatalogLoader {
 
   /// Re-imports the catalog from a user-selected Excel file.
   static Future<int> importFromFile(File file) async {
+    if (kIsWeb) return 0;
     final bytes = file.readAsBytesSync();
     final parsed = _parseXlsx(bytes);
     if (parsed.isEmpty) return 0;
@@ -326,6 +328,7 @@ class CatalogLoader {
 
   /// Returns a temp path for an imported source file so tests/tools can reuse it.
   static Future<String> tempPath() async {
+    if (kIsWeb) return 'imported_catalog.xlsx';
     final dir = await getApplicationDocumentsDirectory();
     return '${dir.path}/imported_catalog.xlsx';
   }

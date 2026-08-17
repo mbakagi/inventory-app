@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -48,11 +49,19 @@ class _SessionsScreenState extends State<SessionsScreen> {
       ]);
     }
 
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File('${dir.path}/count_${session.depot}_${session.createdAt.millisecondsSinceEpoch}.xlsx');
-    await file.writeAsBytes(excel.encode()!);
-
-    await Share.shareXFiles([XFile(file.path)], text: 'Count session: ${session.depot}');
+    if (kIsWeb) {
+      // On web, share the raw bytes directly
+      final bytes = excel.encode()!;
+      final tempDir = await getApplicationDocumentsDirectory();
+      final file = File('${tempDir.path}/count_${session.depot}_${session.createdAt.millisecondsSinceEpoch}.xlsx');
+      await file.writeAsBytes(bytes);
+      await Share.shareXFiles([XFile(file.path)], text: 'Count session: ${session.depot}');
+    } else {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/count_${session.depot}_${session.createdAt.millisecondsSinceEpoch}.xlsx');
+      await file.writeAsBytes(excel.encode()!);
+      await Share.shareXFiles([XFile(file.path)], text: 'Count session: ${session.depot}');
+    }
   }
 
   Future<void> _importSession() async {
