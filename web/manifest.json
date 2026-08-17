@@ -1,0 +1,35 @@
+{
+    "name": "ST3S Inventory",
+    "short_name": "ST3S Inv",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#D32F2F",
+    "theme_color": "#D32F2F",
+    "description": "ST3S Inventory - Fire panels, detectors, access control, sirens",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}

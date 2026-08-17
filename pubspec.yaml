@@ -1,0 +1,46 @@
+name: inventory_app
+description: "ST3S Inventory Stock Management - Fire panels, detectors, access control, sirens"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  # Local storage (offline counts)
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.5
+  # Barcode scanning
+  mobile_scanner: ^7.0.0
+  # OCR (Android only - ML Kit)
+  google_mlkit_text_recognition: ^0.14.0
+  # Camera photo capture for OCR
+  image_picker: ^1.1.2
+  # Excel export/import
+  excel: ^4.0.6
+  file_picker: ^10.0.0
+  share_plus: ^10.1.2
+  # State management
+  provider: ^6.1.2
+  qr_flutter: ^4.1.0
+  pdf: ^3.12.0
+  printing: ^5.14.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/catalog.xlsx
+    - assets/products.json
