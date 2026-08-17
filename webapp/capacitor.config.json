@@ -1,0 +1,8 @@
+{
+  "appId": "com.st3s.inventory",
+  "appName": "ST3S Inventory",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  }
+}
