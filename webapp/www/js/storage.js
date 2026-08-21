@@ -1,4 +1,4 @@
-// Storage module - localStorage wrapper for sessions and settings
+// Storage module - localStorage wrapper for sessions, settings and user data
 const Storage = {
   _prefix: 'st3s_',
 
@@ -40,7 +40,7 @@ const Storage = {
     localStorage.setItem(this._prefix + 'sessions', JSON.stringify(sessions));
   },
 
-  // Catalog cache
+  // Catalog cache (mirror of products.json for offline use)
   getCachedCatalog() {
     try {
       const raw = localStorage.getItem(this._prefix + 'catalog');
@@ -55,5 +55,68 @@ const Storage = {
     } catch (e) {
       // localStorage full - ignore
     }
+  },
+
+  // Favorites (pinned products)
+  getFavorites() {
+    try {
+      const raw = localStorage.getItem(this._prefix + 'favorites');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  },
+  setFavorites(list) {
+    localStorage.setItem(this._prefix + 'favorites', JSON.stringify(list));
+  },
+  isFavorite(ref) {
+    return this.getFavorites().includes(ref);
+  },
+  toggleFavorite(ref) {
+    const list = this.getFavorites();
+    const i = list.indexOf(ref);
+    if (i >= 0) list.splice(i, 1);
+    else list.push(ref);
+    this.setFavorites(list);
+    return i < 0; // true if now favorited
+  },
+
+  // Stock adjustments (audit trail)
+  getAdjustments() {
+    try {
+      const raw = localStorage.getItem(this._prefix + 'adjustments');
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  },
+  addAdjustments(entries) {
+    const list = this.getAdjustments();
+    for (const e of entries) list.unshift(e);
+    if (list.length > 500) list.length = 500;
+    localStorage.setItem(this._prefix + 'adjustments', JSON.stringify(list));
+  },
+
+  // Migrate a product reference across all stored data
+  migrateRef(oldRef, newRef) {
+    const sessions = this.getSessions();
+    let changed = false;
+    for (const s of sessions) {
+      for (const e of s.entries) {
+        if (e.ref === oldRef) { e.ref = newRef; changed = true; }
+      }
+    }
+    if (changed) localStorage.setItem(this._prefix + 'sessions', JSON.stringify(sessions));
+
+    const favs = this.getFavorites();
+    const fi = favs.indexOf(oldRef);
+    if (fi >= 0) { favs[fi] = newRef; this.setFavorites(favs); }
+
+    const adj = this.getAdjustments();
+    let aChanged = false;
+    for (const a of adj) {
+      if (a.ref === oldRef) { a.ref = newRef; aChanged = true; }
+    }
+    if (aChanged) localStorage.setItem(this._prefix + 'adjustments', JSON.stringify(adj));
   }
 };

@@ -1,52 +1,150 @@
-// Catalog module - loads and manages product data
+// Catalog module - loads and manages product data with a user-editable overrides layer
 const Catalog = {
-  products: [],
+  products: [],   // merged products (base + overrides)
+  _base: [],      // raw base catalog (products.json)
   loaded: false,
 
   async load() {
-    // Try cache first
-    const cached = Storage.getCachedCatalog();
-    if (cached && cached.length > 0) {
-      this.products = cached;
-      this.loaded = true;
-    }
-    // Fetch from server
+    let base = null;
+    // Fetch from server (network-first so catalog updates propagate)
     try {
       const resp = await fetch('assets/products.json');
       if (resp.ok) {
         const data = await resp.json();
         if (data.length > 0) {
-          this.products = data;
-          this.loaded = true;
+          base = data;
           Storage.setCachedCatalog(data);
         }
       }
     } catch (e) {
       console.warn('Failed to load catalog from server, using cache');
     }
+    if (!base) base = Storage.getCachedCatalog() || [];
+    this._base = base;
+    this.applyOverrides();
+    this.loaded = true;
     return this.products;
   },
 
-  findByRef(ref) {
-    const r = ref.trim().toUpperCase();
-    return this.products.find(p => p.ref.toUpperCase() === r) || null;
+  // Rebuild this.products from base + overrides
+  applyOverrides() {
+    const refs = Overrides.getRefs();
+    const removed = new Set(Overrides.getRemoved());
+    const baseRefs = new Set(this._base.map(p => p.ref));
+
+    const merged = this._base
+      .filter(p => !removed.has(p.ref))
+      .map(p => {
+        const o = refs[p.ref];
+        return o ? Object.assign({}, p, o) : p;
+      });
+
+    // Include override entries whose ref is not in the base (renamed/added products)
+    for (const [ref, o] of Object.entries(refs)) {
+      if (!baseRefs.has(ref)) {
+        merged.push(Object.assign(
+          { ref, name: ref, qty: 0, family: '', sub1: '', sub2: '', sub3: '', supplier: '', alternatives: [] },
+          o
+        ));
+      }
+    }
+    this.products = merged;
   },
 
-  search(query, brand, family) {
-    const q = query.trim().toLowerCase();
-    return this.products.filter(p => {
-      if (brand && brand !== this._detectBrand(p)) return false;
-      if (family && family !== this._readableFamily(p.family)) return false;
-      if (!q) return true;
-      return p.ref.toLowerCase().includes(q) ||
-             p.name.toLowerCase().includes(q) ||
-             (p.supplier || '').toLowerCase().includes(q);
+  findByRef(ref) {
+    const r = String(ref).trim().toUpperCase();
+    return this.products.find(p => String(p.ref).toUpperCase() === r) || null;
+  },
+
+  // Save an edit to a product (patch may include a new `ref` to rename)
+  saveProduct(currentRef, patch) {
+    const newRef = String(patch.ref || currentRef).trim().toUpperCase();
+    if (newRef !== String(currentRef).toUpperCase()) {
+      return this.renameRef(currentRef, newRef, patch);
+    }
+    const clean = Object.assign({}, patch);
+    Overrides.set(currentRef, clean);
+    this.applyOverrides();
+    Storage.setCachedCatalog(this.products);
+    return this.findByRef(newRef);
+  },
+
+  // Rename a reference and migrate all stored data
+  renameRef(oldRef, newRef) {
+    const current = this.findByRef(oldRef);
+    if (!current) return null;
+    const target = this.findByRef(newRef);
+    if (target && target !== current) {
+      const err = new Error(`Reference "${newRef}" already exists`);
+      err.collision = true;
+      throw err;
+    }
+    Overrides.remove(oldRef);
+    Overrides.addRemoved(oldRef);
+    Overrides.set(newRef, Object.assign({}, current, { ref: newRef }));
+    Storage.migrateRef(oldRef, newRef);
+    this.applyOverrides();
+    Storage.setCachedCatalog(this.products);
+    return this.findByRef(newRef);
+  },
+
+  // Set expected quantity (used by "apply count to stock")
+  setQty(ref, qty) {
+    const p = this.findByRef(ref);
+    if (!p) return;
+    Overrides.set(p.ref, { qty: Number(qty) || 0 });
+    this.applyOverrides();
+    Storage.setCachedCatalog(this.products);
+  },
+
+  // Filter + search. `filters` = { family, sub1, sub2, sub3, favOnly }
+  search(query, filters) {
+    const q = (query || '').trim().toLowerCase();
+    const f = filters || {};
+    const list = this.products.filter(p => {
+      if (f.family && f.family !== this._readableFamily(p.family)) return false;
+      if (f.sub1 && (p.sub1 || '') !== f.sub1) return false;
+      if (f.sub2 && (p.sub2 || '') !== f.sub2) return false;
+      if (f.sub3 && (p.sub3 || '') !== f.sub3) return false;
+      if (f.favOnly && !Storage.isFavorite(p.ref)) return false;
+      return true;
     });
+
+    if (!q) {
+      list.sort((a, b) => String(a.ref).localeCompare(String(b.ref)));
+      return list;
+    }
+
+    // Substring matches take priority
+    const sub = list.filter(p =>
+      String(p.ref).toLowerCase().includes(q) ||
+      String(p.name).toLowerCase().includes(q) ||
+      String(p.supplier || '').toLowerCase().includes(q)
+    );
+    if (sub.length) return sub;
+
+    // Fuzzy fallback for typos / partial references
+    if (q.length >= 2) {
+      return Fuzzy.match(q, list, 200).filter(m => m.score >= 55).map(m => m.product);
+    }
+    return [];
+  },
+
+  // Distinct values for a sub-classification field (optionally scoped by other filters)
+  getValues(field, filters) {
+    const scope = filters ? this.search('', filters) : this.products;
+    const set = new Set();
+    for (const p of scope) {
+      const v = (p[field] || '').trim();
+      if (v) set.add(v);
+    }
+    return [...set].sort();
   },
 
   getBrands() {
     const set = new Set();
     for (const p of this.products) {
+      if (p.sub3) set.add(p.sub3);
       const b = this._detectBrand(p);
       if (b) set.add(b);
       if (p.supplier) set.add(p.supplier);
