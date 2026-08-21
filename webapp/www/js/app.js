@@ -55,6 +55,7 @@ const App = {
     document.getElementById('catalogSearch').addEventListener('input', () => this._renderCatalog());
     document.getElementById('brandFilter').addEventListener('change', () => this._renderCatalog());
     document.getElementById('familyFilter').addEventListener('change', () => this._renderCatalog());
+    document.getElementById('catalogPrintLabels').addEventListener('click', () => this._printCatalogLabels());
 
     // Sessions
     document.getElementById('importExcel').addEventListener('click', () => this._importExcel());
@@ -66,6 +67,22 @@ const App = {
 
     // QR
     document.getElementById('qrClose').addEventListener('click', () => document.getElementById('qrDialog').classList.add('hidden'));
+    document.getElementById('qrDownload').addEventListener('click', () => this._downloadQr());
+    document.getElementById('qrPrintLabel').addEventListener('click', () => {
+      if (this._currentQrRef) { this._hideQr(); this._printSingleLabel(this._currentQrRef, this._currentQrName || ''); }
+    });
+
+    // Label Print Dialog
+    document.getElementById('labelCancel').addEventListener('click', () => this._hideLabelDialog());
+    document.getElementById('labelPrint').addEventListener('click', () => this._doPrintLabels());
+    document.getElementById('labelSize').addEventListener('change', () => this._onLabelSizeChange());
+    document.getElementById('labelW').addEventListener('input', () => this._updateLabelPreview());
+    document.getElementById('labelH').addEventListener('input', () => this._updateLabelPreview());
+    document.getElementById('labelCols').addEventListener('change', () => this._updateLabelPreview());
+    document.getElementById('labelTemplate').addEventListener('change', () => this._updateLabelPreview());
+    document.getElementById('labelBorders').addEventListener('change', () => this._updateLabelPreview());
+    document.getElementById('labelSelectAll').addEventListener('click', () => this._labelToggleAll(true));
+    document.getElementById('labelDeselectAll').addEventListener('click', () => this._labelToggleAll(false));
 
     // Home toolbar
     document.getElementById('backupBtn').addEventListener('click', () => this._backupData());
@@ -110,7 +127,7 @@ const App = {
       title.textContent = 'ST3S Inventory';
     } else {
       backBtn.classList.remove('hidden');
-      const titles = { count: 'Count Mode', catalog: 'Catalog', sessions: 'Sessions', 'session-detail': 'Session Detail', taxonomy: 'Taxonomy', dashboard: 'Dashboard' };
+      const titles = { count: 'Count Mode', catalog: 'Catalog', sessions: 'Sessions', 'session-detail': 'Session Detail', taxonomy: 'Taxonomy', dashboard: 'Dashboard', manuals: 'Manuals & Help' };
       title.textContent = titles[screen] || screen;
     }
 
@@ -313,6 +330,7 @@ const App = {
     }
     const limit = 100;
     const shown = results.slice(0, limit);
+    document.getElementById('catalogResultCount').textContent = `${results.length} products`;
     document.getElementById('catalogList').innerHTML = shown.map(p => `
       <div class="catalog-item">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -321,6 +339,7 @@ const App = {
             <div class="catalog-name">${this._esc(p.name)}</div>
             <div class="catalog-meta">Qty: ${p.qty || 0} | ${this._esc(p.supplier || '')} | ${Catalog._readableFamily(p.family)}</div>
           </div>
+          <button class="btn-sm" onclick="event.stopPropagation();App._printSingleLabel('${this._esc(p.ref)}','${this._esc(p.name)}')" title="Print Label">🖨️</button>
           <button class="btn-sm" onclick="event.stopPropagation();App._showQr('${this._esc(p.ref)}','${this._esc(p.name)}')" title="QR Code">🔲</button>
         </div>
       </div>`).join('');
@@ -330,13 +349,30 @@ const App = {
 
   // --- QR Code ---
   async _showQr(ref, name) {
+    this._currentQrRef = ref;
+    this._currentQrName = name || ref;
     document.getElementById('qrTitle').textContent = name || ref;
     document.getElementById('qrRef').textContent = ref;
     const canvas = document.getElementById('qrCanvas');
+    if (typeof QRCode === 'undefined') { this._toast('QR library not loaded (check connection)'); return; }
     try {
-      await QRCode.toCanvas(canvas, ref, { width: 200, margin: 1, color: { dark: '#000', light: '#fff' } });
+      // Higher res + error correction for reliable scanning
+      await QRCode.toCanvas(canvas, ref, { width: 280, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } });
       document.getElementById('qrDialog').classList.remove('hidden');
-    } catch (e) { this._toast('QR generation failed'); }
+    } catch (e) { this._toast('QR generation failed: ' + e.message); }
+  },
+  _hideQr() { document.getElementById('qrDialog').classList.add('hidden'); },
+  _downloadQr() {
+    const canvas = document.getElementById('qrCanvas');
+    if (!this._currentQrRef || !canvas) return;
+    try {
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QR_${this._currentQrRef}.png`;
+      a.click();
+      this._toast('QR PNG downloaded');
+    } catch (e) { this._toast('Download failed'); }
   },
 
   // --- Sessions ---
@@ -552,36 +588,248 @@ const App = {
     this._toast(this._darkMode ? 'Dark mode on' : 'Dark mode off');
   },
 
-  // --- Print Labels ---
-  _printLabels() {
-    const entries = Object.values(this.entries);
-    if (entries.length === 0) { this._toast('No items to print labels for'); return; }
+  // --- Print Labels (Dialog-based) ---
+  _printLabels(items) {
+    // items can be passed from catalog, or default to current count entries
+    const source = items || Object.values(this.entries);
+    if (source.length === 0) { this._toast('No items to print labels for'); return; }
+    this._labelItems = source.map(e => ({ ref: e.ref, name: e.name, selected: true }));
+    this._showLabelDialog();
+  },
+
+  _showLabelDialog() {
+    this._renderLabelItems();
+    document.getElementById('labelDialog').classList.remove('hidden');
+    this._onLabelSizeChange();
+    this._updateLabelPreview();
+  },
+
+  _hideLabelDialog() {
+    document.getElementById('labelDialog').classList.add('hidden');
+  },
+
+  _renderLabelItems() {
+    const selected = this._labelItems.filter(i => i.selected).length;
+    document.getElementById('labelItemCount').textContent = selected;
+    document.getElementById('labelItemsList').innerHTML = this._labelItems.map((item, idx) => `
+      <div class="label-item-row" onclick="App._labelToggleItem(${idx})">
+        <input type="checkbox" ${item.selected ? 'checked' : ''} onclick="event.stopPropagation();App._labelToggleItem(${idx})">
+        <span class="label-item-ref">${this._esc(item.ref)}</span>
+        <span class="label-item-name">${this._esc(item.name)}</span>
+      </div>`).join('');
+  },
+
+  _labelToggleItem(idx) {
+    this._labelItems[idx].selected = !this._labelItems[idx].selected;
+    this._renderLabelItems();
+    this._updateLabelPreview();
+  },
+
+  _labelToggleAll(select) {
+    this._labelItems.forEach(i => i.selected = select);
+    this._renderLabelItems();
+    this._updateLabelPreview();
+  },
+
+  _onLabelSizeChange() {
+    const val = document.getElementById('labelSize').value;
+    const custom = document.getElementById('labelCustomSize');
+    if (val === 'custom') {
+      custom.classList.remove('hidden');
+    } else {
+      custom.classList.add('hidden');
+      const [w, h] = val.split('x').map(Number);
+      document.getElementById('labelW').value = w;
+      document.getElementById('labelH').value = h;
+    }
+    this._updateLabelPreview();
+  },
+
+  _getLabelDimensions() {
+    const w = parseInt(document.getElementById('labelW').value) || 60;
+    const h = parseInt(document.getElementById('labelH').value) || 35;
+    return { w, h };
+  },
+
+  _updateLabelPreview() {
+    const canvas = document.getElementById('labelPreviewCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const { w, h } = this._getLabelDimensions();
+    const cols = parseInt(document.getElementById('labelCols').value) || 3;
+    const template = document.getElementById('labelTemplate').value;
+    const borders = document.getElementById('labelBorders').checked;
+
+    // Scale: preview canvas is 180x105, show one label scaled
+    const scale = Math.min(160 / w, 90 / h);
+    const pw = w * scale;
+    const ph = h * scale;
+    const px = (180 - pw) / 2;
+    const py = (105 - ph) / 2;
+
+    ctx.clearRect(0, 0, 180, 105);
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(px, py, pw, ph);
+
+    if (borders) {
+      ctx.strokeStyle = '#999';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px, py, pw, ph);
+    }
+
+    // Show sample text
+    ctx.fillStyle = '#333';
+    const fontSize = Math.max(5, scale * 3.5);
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.fillText('REF-12345', px + 4, py + fontSize + 2);
+
+    ctx.font = `${fontSize * 0.75}px sans-serif`;
+    ctx.fillStyle = '#666';
+    ctx.fillText('Product name...', px + 4, py + fontSize * 2 + 4);
+
+    if (template !== 'text-only') {
+      // Draw a small placeholder QR square
+      const qrSize = ph * 0.55;
+      const qrX = px + pw - qrSize - 4;
+      const qrY = py + (ph - qrSize) / 2;
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(qrX, qrY, qrSize, qrSize);
+      ctx.fillStyle = '#999';
+      ctx.font = `${qrSize * 0.3}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('QR', qrX + qrSize / 2, qrY + qrSize / 2 + qrSize * 0.1);
+      ctx.textAlign = 'start';
+    }
+
+    // Show columns indicator
+    ctx.fillStyle = '#999';
+    ctx.font = '9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${cols} per row · ${w}×${h}mm`, 90, 102);
+    ctx.textAlign = 'start';
+  },
+
+  async _doPrintLabels() {
+    const selected = this._labelItems.filter(i => i.selected);
+    if (selected.length === 0) { this._toast('No items selected'); return; }
+
+    const { w, h } = this._getLabelDimensions();
+    const cols = parseInt(document.getElementById('labelCols').value) || 3;
+    const template = document.getElementById('labelTemplate').value;
+    const borders = document.getElementById('labelBorders').checked;
+
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    let x = 5, y = 5;
-    const w = 60, h = 35;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageW = 210;
+    const pageH = 297;
+    const margin = 5;
+    const gap = 3;
+    const usableW = pageW - margin * 2;
+    const cellW = (usableW - gap * (cols - 1)) / cols;
+    const cellH = (cellW / w) * h; // maintain aspect ratio
+
+    // Pre-generate all QR codes as data URLs
+    const qrDataUrls = [];
+    if (template !== 'text-only') {
+      for (const item of selected) {
+        try {
+          const dataUrl = await QRCode.toDataURL(item.ref, {
+            width: 200,
+            margin: 0,
+            color: { dark: '#000', light: '#fff' }
+          });
+          qrDataUrls.push(dataUrl);
+        } catch (e) {
+          qrDataUrls.push(null);
+        }
+      }
+    }
+
     let col = 0;
-    entries.forEach((e, i) => {
-      if (col === 3) { col = 0; x = 5; y += h + 5; }
-      if (y > 270) { doc.addPage(); y = 5; x = 5; col = 0; }
-      doc.setDrawColor(0);
-      doc.setLineWidth(0.3);
-      doc.rect(x, y, w, h);
-      doc.setFontSize(7);
-      doc.text(e.ref, x + 2, y + 6);
-      doc.setFontSize(5);
-      doc.text(e.name.substring(0, 30), x + 2, y + 12);
-      // QR code
-      const qrCanvas = document.createElement('canvas');
-      QRCode.toCanvas(qrCanvas, e.ref, { width: 80, margin: 0 }, () => {
-        doc.addImage(qrCanvas, 'PNG', x + 30, y + 14, 25, 20);
-        if (i === entries.length - 1) doc.save('labels.pdf');
-      });
-      x += w + 5;
+    let x = margin;
+    let y = margin;
+
+    for (let i = 0; i < selected.length; i++) {
+      const item = selected[i];
+
+      // New page if needed
+      if (y + cellH > pageH - margin) {
+        doc.addPage();
+        y = margin;
+        x = margin;
+        col = 0;
+      }
+
+      // Draw border
+      if (borders) {
+        doc.setDrawColor(180);
+        doc.setLineWidth(0.2);
+        doc.rect(x, y, cellW, cellH);
+      }
+
+      if (template === 'text-only') {
+        // Text only layout
+        doc.setFontSize(Math.max(5, cellH * 0.22));
+        doc.setTextColor(0);
+        doc.text(item.ref, x + 2, y + cellH * 0.3);
+        doc.setFontSize(Math.max(3.5, cellH * 0.16));
+        doc.setTextColor(100);
+        doc.text(item.name.substring(0, 40), x + 2, y + cellH * 0.55);
+      } else if (template === 'qr-only') {
+        // QR only - centered
+        if (qrDataUrls[i]) {
+          const qrSize = Math.min(cellW, cellH) * 0.8;
+          const qrX = x + (cellW - qrSize) / 2;
+          const qrY = y + (cellH - qrSize) / 2;
+          doc.addImage(qrDataUrls[i], 'PNG', qrX, qrY, qrSize, qrSize);
+        }
+      } else {
+        // QR + Text layout
+        const qrSize = cellH * 0.65;
+        const qrX = x + cellW - qrSize - 2;
+        const qrY = y + (cellH - qrSize) / 2;
+
+        if (qrDataUrls[i]) {
+          doc.addImage(qrDataUrls[i], 'PNG', qrX, qrY, qrSize, qrSize);
+        }
+
+        const textW = qrX - x - 4;
+        doc.setFontSize(Math.max(5, cellH * 0.22));
+        doc.setTextColor(0);
+        doc.text(item.ref, x + 2, y + cellH * 0.28, { maxWidth: textW });
+        doc.setFontSize(Math.max(3.5, cellH * 0.16));
+        doc.setTextColor(100);
+        doc.text(item.name.substring(0, 40), x + 2, y + cellH * 0.55, { maxWidth: textW });
+      }
+
+      // Advance position
       col++;
-    });
-    if (entries.length === 0) return;
-    setTimeout(() => doc.save('labels.pdf'), 500);
+      if (col >= cols) {
+        col = 0;
+        x = margin;
+        y += cellH + gap;
+      } else {
+        x += cellW + gap;
+      }
+    }
+
+    this._hideLabelDialog();
+    doc.save('labels.pdf');
+    this._toast(`Printed ${selected.length} labels`);
+  },
+
+  // --- Catalog Label Printing ---
+  _printCatalogLabels() {
+    const query = document.getElementById('catalogSearch').value;
+    const brand = document.getElementById('brandFilter').value;
+    const family = document.getElementById('familyFilter').value;
+    const results = Catalog.search(query, brand, family);
+    if (results.length === 0) { this._toast('No products to print'); return; }
+    this._printLabels(results);
+  },
+
+  _printSingleLabel(ref, name) {
+    this._printLabels([{ ref, name }]);
   },
 
   // --- Taxonomy ---
