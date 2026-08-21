@@ -1,0 +1,57 @@
+{
+  "name": "ST3S Inventory",
+  "short_name": "ST3S",
+  "description": "ST3S Inventory Stock Management - Fire panels, detectors, access control, sirens",
+  "id": "/inventory-app/",
+  "start_url": "/inventory-app/",
+  "scope": "/inventory-app/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f5f5",
+  "theme_color": "#b71c1c",
+  "categories": ["business", "productivity", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Count Mode",
+      "short_name": "Count",
+      "url": "/inventory-app/#count",
+      "description": "Scan barcodes or use camera OCR"
+    },
+    {
+      "name": "Catalog",
+      "short_name": "Catalog",
+      "url": "/inventory-app/#catalog",
+      "description": "Browse the product catalog"
+    },
+    {
+      "name": "Dashboard",
+      "short_name": "Dashboard",
+      "url": "/inventory-app/#dashboard",
+      "description": "View analytics and variance"
+    }
+  ],
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "assets/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

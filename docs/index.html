@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="description" content="ST3S Inventory - Fire panels, detectors, access control, sirens">
+  <meta name="theme-color" content="#b71c1c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ST3S Inventory">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="assets/favicon.png">
+  <link rel="apple-touch-icon" href="assets/icon-192.png">
+  <title>ST3S Inventory</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.3/dist/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div id="offlineBanner" class="offline-banner hidden">You're offline — data is saved locally and will be here when you reconnect.</div>
+  <div id="app">
+    <!-- Header -->
+    <header id="header">
+      <button id="backBtn" class="icon-btn hidden" title="Back">←</button>
+      <h1 id="headerTitle">ST3S Inventory</h1>
+      <span id="onlineDot" class="online-dot" title="Connection status"></span>
+      <button id="menuBtn" class="icon-btn" title="Menu">☰</button>
+    </header>
+
+    <!-- Screens -->
+    <main id="main">
+      <!-- Home Screen -->
+      <section id="screen-home" class="screen active">
+        <div class="card setup-card">
+          <div class="setup-row">
+            <span class="setup-icon">👤</span>
+            <div class="setup-info">
+              <strong id="displayName">Set your name</strong>
+              <small id="displayDepot">No depot selected</small>
+            </div>
+            <button id="setupBtn" class="btn-sm">Edit</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="action-card" data-screen="count">
+            <span class="action-icon">📷</span>
+            <div><strong>Count Mode</strong><small>Scan barcodes or use camera OCR</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+          <button class="action-card" data-screen="catalog">
+            <span class="action-icon">📦</span>
+            <div><strong>Product Catalog</strong><small id="catalogCount">Loading products...</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+          <button class="action-card" data-screen="sessions">
+            <span class="action-icon">📋</span>
+            <div><strong>Count Sessions</strong><small>View, export and merge counts</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+          <button class="action-card" data-screen="dashboard">
+            <span class="action-icon">📊</span>
+            <div><strong>Dashboard</strong><small>Charts, variance, insights</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+          <button class="action-card" data-screen="taxonomy">
+            <span class="action-icon">🏷️</span>
+            <div><strong>Taxonomy</strong><small>Manage brands & categories</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+          <button class="action-card" data-screen="manuals">
+            <span class="action-icon">📘</span>
+            <div><strong>Manuals & Help</strong><small>Installation guides & usage tips</small></div>
+            <span class="action-arrow">›</span>
+          </button>
+        </div>
+        <div id="favoritesSection" class="favorites-section hidden">
+          <h3>⭐ Favorites</h3>
+          <div id="favoritesList" class="favorites-list"></div>
+        </div>
+        <div class="toolbar" style="margin-top:8px;">
+          <button id="backupBtn" class="btn-sm">💾 Backup</button>
+          <button id="restoreBtn" class="btn-sm">📥 Restore</button>
+          <button id="darkModeBtn" class="btn-sm">🌓 Dark</button>
+          <button id="installBtn" class="btn-sm hidden">⬇️ Install</button>
+        </div>
+      </section>
+
+      <!-- Count Screen -->
+      <section id="screen-count" class="screen">
+        <div class="search-bar">
+          <input type="text" id="searchInput" placeholder="Type reference or name..." autocomplete="off">
+          <button id="ocrBtn" class="btn" title="OCR Photo">📷 OCR</button>
+          <button id="undoBtn" class="btn" title="Undo last action">↩</button>
+          <button id="batchBtn" class="btn" title="Toggle batch mode">⚡</button>
+          <button id="printLabelsBtn" class="btn" title="Print labels">🖨️</button>
+        </div>
+        <div id="scannerContainer">
+          <div id="scannerView"></div>
+          <button id="toggleScanner" class="btn full">Start Scanner</button>
+        </div>
+        <div id="lastScanned" class="last-scanned hidden"></div>
+        <div class="summary-bar">
+          <span id="itemCount">0 items</span>
+          <span id="totalCount">0 total</span>
+        </div>
+        <div id="entriesList" class="entries-list"></div>
+        <button id="saveSession" class="btn primary full">💾 Save Session</button>
+      </section>
+
+      <!-- Catalog Screen -->
+      <section id="screen-catalog" class="screen">
+        <div class="search-bar">
+          <input type="text" id="catalogSearch" placeholder="Search products (fuzzy)..." autocomplete="off">
+        </div>
+        <div class="filter-row">
+          <select id="familyFilter"><option value="">All Families</option></select>
+          <select id="sub1Filter"><option value="">All Sub-1</option></select>
+        </div>
+        <div class="filter-row">
+          <select id="sub2Filter"><option value="">All Sub-2</option></select>
+          <select id="sub3Filter"><option value="">All Brands</option></select>
+          <label class="fav-filter"><input type="checkbox" id="favFilter"> ★ Favorites</label>
+        </div>
+        <div class="toolbar" style="margin-bottom:4px;">
+          <button id="catalogPrintLabels" class="btn-sm">🖨️ Print Labels</button>
+          <button id="catalogFindReplace" class="btn-sm">🔁 Find & Replace</button>
+          <small id="catalogResultCount" style="color:var(--text-secondary);align-self:center;margin-left:auto;"></small>
+        </div>
+        <div id="catalogList" class="catalog-list"></div>
+      </section>
+
+      <!-- Sessions Screen -->
+      <section id="screen-sessions" class="screen">
+        <div class="toolbar">
+          <button id="importExcel" class="btn">📥 Import Excel</button>
+        </div>
+        <div id="sessionsList" class="sessions-list"></div>
+      </section>
+
+      <!-- Session Detail Screen -->
+      <section id="screen-session-detail" class="screen">
+        <div id="sessionDetailInfo" class="detail-info"></div>
+        <div id="sessionDetailEntries" class="entries-list"></div>
+        <div class="detail-actions">
+          <button id="exportExcel" class="btn">📤 Export Excel</button>
+          <button id="exportPdf" class="btn">📄 Export PDF</button>
+          <button id="applyToStock" class="btn">📈 Apply to Stock</button>
+          <button id="deleteSession" class="btn danger">🗑 Delete</button>
+        </div>
+      </section>
+
+      <!-- Dashboard Screen -->
+      <section id="screen-dashboard" class="screen">
+      </section>
+
+      <!-- Taxonomy Screen -->
+      <section id="screen-taxonomy" class="screen">
+        <div class="tabs">
+          <button class="tab active" data-tab="brands">Brands</button>
+          <button class="tab" data-tab="categories">Categories</button>
+        </div>
+        <div id="tab-brands" class="tab-content active">
+          <div class="search-bar">
+            <input type="text" id="newBrand" placeholder="Add new brand...">
+            <button id="addBrand" class="btn primary">Add</button>
+          </div>
+          <div id="brandsList" class="taxonomy-list"></div>
+        </div>
+        <div id="tab-categories" class="tab-content">
+          <div class="search-bar">
+            <input type="text" id="newCategory" placeholder="Add root category...">
+            <button id="addCategory" class="btn primary">Add</button>
+          </div>
+          <div id="categoriesTree" class="taxonomy-tree"></div>
+        </div>
+      </section>
+
+      <!-- Manuals / Help Screen -->
+      <section id="screen-manuals" class="screen">
+        <div class="manual-section">
+          <h3>📱 Install on Android (APK)</h3>
+          <ol>
+            <li>Copy <code>app-release.apk</code> to your phone (USB, email, or cloud).</li>
+            <li>On the phone, open the file. If warned, enable <code>Install unknown apps</code> for your file manager/browser.</li>
+            <li>Tap <code>Install</code> and open <strong>ST3S Inventory</strong>.</li>
+            <li>Grant <strong>Camera</strong> permission when asked (needed for barcode scan & OCR).</li>
+          </ol>
+          <div class="manual-note">The APK works fully offline once the product catalog is loaded the first time.</div>
+        </div>
+        <div class="manual-section">
+          <h3>🌐 Install as Web App (PWA)</h3>
+          <ol>
+            <li>Open the app URL in <strong>Chrome</strong> (Android) or <strong>Safari</strong> (iOS).</li>
+            <li>Android: menu ⋮ → <code>Add to Home screen</code> / <code>Install app</code>.</li>
+            <li>iOS: Share → <code>Add to Home Screen</code>.</li>
+            <li>Launch it from the home screen like a native app.</li>
+          </ol>
+        </div>
+        <div class="manual-section">
+          <h3>📷 Count Mode</h3>
+          <ul>
+            <li><strong>Scan:</strong> tap <code>Start Scanner</code> and point the camera at a barcode/QR.</li>
+            <li><strong>OCR:</strong> tap <code>📷 OCR</code> to read a reference from a photo of a label.</li>
+            <li><strong>Search:</strong> type a reference/name and tap a suggestion, or press Enter for an exact match.</li>
+            <li><strong>Batch ⚡:</strong> keeps focus on the search box for fast repeated entry.</li>
+            <li><strong>Undo ↩</strong> reverses the last change. <strong>Save Session</strong> stores the count.</li>
+          </ul>
+        </div>
+        <div class="manual-section">
+          <h3>🔲 QR Codes & Labels</h3>
+          <ul>
+            <li>In the Catalog, tap <code>🔲</code> on a product to view & download its QR code.</li>
+            <li>Tap <code>🖨️</code> to print a single label, or use <code>Print Labels</code> for many.</li>
+            <li>Choose label size, columns and template (QR+Text / QR only / Text only), then Print to save a PDF.</li>
+            <li>Stick printed QR labels on shelves; scan them later in Count Mode.</li>
+          </ul>
+        </div>
+        <div class="manual-section">
+          <h3>✎ Fixing names & references</h3>
+          <ul>
+            <li>Tap <code>✎</code> on any catalog item to edit its reference, name, supplier, quantity or family.</li>
+            <li>Use <code>🔁 Find & Replace</code> in the Catalog to bulk-fix names, references or suppliers.</li>
+            <li>Rename an entry in Count Mode or a saved session with its <code>✎</code> button.</li>
+            <li>Tap <code>📈 Apply to Stock</code> on a session (or <code>Apply</code> in the variance report) to update expected quantities from a count.</li>
+          </ul>
+        </div>
+        <div class="manual-section">
+          <h3>💾 Backup & Restore</h3>
+          <ul>
+            <li><strong>Backup</strong> downloads a JSON file with sessions, taxonomy, favorites, edits & catalog.</li>
+            <li><strong>Restore</strong> loads that file on any device to move your data.</li>
+            <li>Keep regular backups before clearing browser data or uninstalling.</li>
+          </ul>
+        </div>
+        <div class="manual-section">
+          <h3>🛠️ Troubleshooting</h3>
+          <ul>
+            <li><strong>Scanner won't start:</strong> check camera permission & use HTTPS (or localhost).</li>
+            <li><strong>QR not scanning:</strong> improve lighting; hold steady; clean the lens.</li>
+            <li><strong>No products:</strong> use Sessions → <code>Import Excel</code> to load your <code>Mg.xlsx</code>.</li>
+            <li><strong>Data lost:</strong> restore from your latest backup JSON.</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <!-- Setup Dialog -->
+    <div id="setupDialog" class="dialog-overlay hidden">
+      <div class="dialog">
+        <h2>Setup</h2>
+        <label>Your name</label>
+        <input type="text" id="setupName" placeholder="Enter your name">
+        <label>Depot name</label>
+        <input type="text" id="setupDepot" placeholder="Enter depot name">
+        <div class="dialog-actions">
+          <button id="setupCancel" class="btn">Cancel</button>
+          <button id="setupSave" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Code Dialog -->
+    <div id="qrDialog" class="dialog-overlay hidden">
+      <div class="dialog qr-dialog">
+        <h2 id="qrTitle">QR Code</h2>
+        <canvas id="qrCanvas"></canvas>
+        <p id="qrRef" style="text-align:center;font-weight:700;margin-top:8px;"></p>
+        <div class="qr-actions">
+          <button id="qrDownload" class="btn">⬇️ Download PNG</button>
+          <button id="qrPrintLabel" class="btn">🖨️ Label</button>
+        </div>
+        <div class="dialog-actions">
+          <button id="qrClose" class="btn">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Label Print Dialog -->
+    <div id="labelDialog" class="dialog-overlay hidden">
+      <div class="dialog label-dialog">
+        <h2>Print Labels</h2>
+        <div class="label-options">
+          <div class="label-option-row">
+            <label>Label Size</label>
+            <select id="labelSize">
+              <option value="50x25">Small (50×25mm)</option>
+              <option value="60x35" selected>Medium (60×35mm)</option>
+              <option value="70x40">Large (70×40mm)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div id="labelCustomSize" class="label-option-row hidden">
+            <label>Width (mm)</label>
+            <input type="number" id="labelW" value="60" min="20" max="200">
+            <label>Height (mm)</label>
+            <input type="number" id="labelH" value="35" min="15" max="200">
+          </div>
+          <div class="label-option-row">
+            <label>Columns</label>
+            <select id="labelCols">
+              <option value="2">2 per row</option>
+              <option value="3" selected>3 per row</option>
+              <option value="4">4 per row</option>
+            </select>
+          </div>
+          <div class="label-option-row">
+            <label>Template</label>
+            <select id="labelTemplate">
+              <option value="qr-text" selected>QR + Text</option>
+              <option value="qr-only">QR Only</option>
+              <option value="text-only">Text Only</option>
+              <option value="barcode">Barcode (Code128)</option>
+            </select>
+          </div>
+          <div class="label-option-row">
+            <label>
+              <input type="checkbox" id="labelBorders" checked> Show borders
+            </label>
+          </div>
+        </div>
+        <div class="label-items-header">
+          <span>Items (<span id="labelItemCount">0</span>)</span>
+          <button id="labelSelectAll" class="btn-sm">Select All</button>
+          <button id="labelDeselectAll" class="btn-sm">Deselect All</button>
+        </div>
+        <div id="labelItemsList" class="label-items-list"></div>
+        <div class="label-preview" id="labelPreview">
+          <canvas id="labelPreviewCanvas" width="180" height="105"></canvas>
+          <small>Preview (scaled)</small>
+        </div>
+        <div class="dialog-actions">
+          <button id="labelCancel" class="btn">Cancel</button>
+          <button id="labelPrint" class="btn primary">🖨️ Print</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OCR Progress Dialog -->
+    <div id="ocrDialog" class="dialog-overlay hidden">
+      <div class="dialog ocr-dialog">
+        <div class="spinner"></div>
+        <p id="ocrStatus">Processing image...</p>
+        <progress id="ocrProgress" value="0" max="100"></progress>
+      </div>
+    </div>
+
+    <!-- Edit Product Dialog -->
+    <div id="editProductDialog" class="dialog-overlay hidden">
+      <div class="dialog">
+        <h2>Edit Product</h2>
+        <label>Reference</label>
+        <input type="text" id="editProductRef" placeholder="Reference">
+        <label>Name</label>
+        <input type="text" id="editProductName" placeholder="Name">
+        <label>Supplier</label>
+        <input type="text" id="editProductSupplier" placeholder="Supplier">
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;">
+            <label>Quantity</label>
+            <input type="number" id="editProductQty" step="any">
+          </div>
+          <div style="flex:1;">
+            <label>Family</label>
+            <input type="text" id="editProductFamily" placeholder="e.g. INCEN">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;">
+            <label>Sub-category (sub1)</label>
+            <input type="text" id="editProductSub1" placeholder="e.g. VIDEO-IP">
+          </div>
+          <div style="flex:1;">
+            <label>Brand (sub3)</label>
+            <input type="text" id="editProductSub3" placeholder="e.g. FINSECUR">
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <button id="editProductDelete" class="btn danger" style="margin-right:auto;">Reset</button>
+          <button id="editProductCancel" class="btn">Cancel</button>
+          <button id="editProductSave" class="btn primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Find & Replace Dialog -->
+    <div id="findReplaceDialog" class="dialog-overlay hidden">
+      <div class="dialog">
+        <h2>Find & Replace</h2>
+        <label>Find</label>
+        <input type="text" id="findReplaceInput" placeholder="Text to find">
+        <label>Replace with</label>
+        <input type="text" id="findReplaceReplace" placeholder="Replacement text">
+        <label>Scope</label>
+        <select id="findReplaceField">
+          <option value="name">Names</option>
+          <option value="ref">References</option>
+          <option value="supplier">Suppliers</option>
+        </select>
+        <p style="margin-top:12px;font-size:0.9rem;color:var(--text-secondary);">Matches: <strong id="findReplaceCount">0</strong></p>
+        <div class="dialog-actions">
+          <button id="findReplaceCancel" class="btn">Cancel</button>
+          <button id="findReplaceApply" class="btn primary">Apply</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <!-- App Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/overrides.js"></script>
+  <script src="js/fuzzy.js"></script>
+  <script src="js/catalog.js"></script>
+  <script src="js/scanner.js"></script>
+  <script src="js/ocr.js"></script>
+  <script src="js/excel.js"></script>
+  <script src="js/taxonomy.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>
