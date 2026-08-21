@@ -247,12 +247,13 @@ const App = {
     }
   },
   _onBarcode(code) {
-    const product = Catalog.findByRef(code);
+    const ref = this._parseQr(code);
+    const product = Catalog.findByRef(ref);
     if (product) this._addProduct(product);
     else {
-      const matches = Fuzzy.match(code, Catalog.products, 1);
+      const matches = Fuzzy.match(ref, Catalog.products, 1);
       if (matches.length > 0 && matches[0].score >= 85) this._addProduct(matches[0].product);
-      else this._toast(`Not found: ${code}`);
+      else this._toast(`Not found: ${ref}`);
     }
   },
 
@@ -297,7 +298,7 @@ const App = {
     if (dd) dd.remove();
   },
   _onSearchEnter() {
-    const q = document.getElementById('searchInput').value.trim();
+    const q = this._parseQr(document.getElementById('searchInput').value);
     if (q.length < 2) return;
     const matches = Fuzzy.match(q, Catalog.products, 1);
     if (matches.length > 0 && matches[0].score >= 85) {
@@ -342,11 +343,11 @@ const App = {
     const lines = text.split('\n').map(l => l.trim()).filter(l => l);
     let found = false;
     for (const line of lines) {
-      const product = Catalog.findByRef(line);
+      const product = Catalog.findByRef(this._parseQr(line));
       if (product) { this._addProduct(product); found = true; break; }
       for (const word of line.split(/[\s,;:]+/)) {
         if (word.length < 3) continue;
-        const matches = Fuzzy.match(word, Catalog.products, 1);
+        const matches = Fuzzy.match(this._parseQr(word), Catalog.products, 1);
         if (matches.length > 0 && matches[0].score >= 85) { this._addProduct(matches[0].product); found = true; break; }
       }
       if (found) break;
@@ -612,6 +613,18 @@ const App = {
   },
 
   // --- QR Code ---
+  _qrPayload(ref) { return 'ST3S:' + ref; },
+  _parseQr(code) {
+    const c = String(code == null ? '' : code).trim();
+    return c.startsWith('ST3S:') ? c.slice(5).trim() : c;
+  },
+  _estimateQrModules(text) {
+    try {
+      if (typeof QRCode === 'undefined' || typeof QRCode.create !== 'function') return 0;
+      const qr = QRCode.create(text, { errorCorrectionLevel: 'H' });
+      return (qr && qr.modules) ? qr.modules.size : 0;
+    } catch (e) { return 0; }
+  },
   async _showQr(ref, name) {
     this._currentQrRef = ref;
     this._currentQrName = name || ref;
@@ -620,15 +633,17 @@ const App = {
     const canvas = document.getElementById('qrCanvas');
     if (typeof QRCode === 'undefined') { this._toast('QR library not loaded (check connection)'); return; }
     try {
-      await QRCode.toCanvas(canvas, ref, { width: 280, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } });
+      await QRCode.toCanvas(canvas, this._qrPayload(ref), { width: 280, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } });
       document.getElementById('qrDialog').classList.remove('hidden');
     } catch (e) { this._toast('QR generation failed: ' + e.message); }
   },
   _hideQr() { document.getElementById('qrDialog').classList.add('hidden'); },
-  _downloadQr() {
-    const canvas = document.getElementById('qrCanvas');
-    if (!this._currentQrRef || !canvas) return;
+  async _downloadQr() {
+    if (!this._currentQrRef) return;
+    if (typeof QRCode === 'undefined') { this._toast('QR library not loaded (check connection)'); return; }
     try {
+      const canvas = document.createElement('canvas');
+      await QRCode.toCanvas(canvas, this._qrPayload(this._currentQrRef), { width: 1024, margin: 4, errorCorrectionLevel: 'H', color: { dark: '#000000', light: '#ffffff' } });
       const url = canvas.toDataURL('image/png');
       const a = document.createElement('a');
       a.href = url;
@@ -1041,6 +1056,25 @@ const App = {
       ctx.fillStyle = '#666';
       ctx.font = `${fontSize * 0.7}px sans-serif`;
       ctx.fillText('CODE128', px + 4, py + ph * 0.82);
+    } else if (template === 'qr-barcode') {
+      // QR placeholder (left) + barcode placeholder (right)
+      const qrSize = ph * 0.5;
+      const qrX = px + 4;
+      const qrY = py + (ph - qrSize) / 2;
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(qrX, qrY, qrSize, qrSize);
+      ctx.fillStyle = '#999';
+      ctx.font = `${qrSize * 0.3}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('QR', qrX + qrSize / 2, qrY + qrSize / 2 + qrSize * 0.1);
+      ctx.textAlign = 'start';
+      ctx.fillStyle = '#333';
+      ctx.font = `bold ${fontSize * 0.8}px sans-serif`;
+      ctx.fillText('REF', qrX + qrSize + 6, py + ph * 0.4);
+      for (let i = 0; i < pw - qrSize - 16; i += 3) {
+        ctx.fillStyle = (i % 6 === 0) ? '#333' : '#999';
+        ctx.fillRect(qrX + qrSize + 6 + i, py + ph * 0.6, 1.5, ph * 0.2);
+      }
     } else {
       ctx.fillText('REF-12345', px + 4, py + fontSize + 2);
       ctx.font = `${fontSize * 0.75}px sans-serif`;
@@ -1086,22 +1120,44 @@ const App = {
     const cellW = (usableW - gap * (cols - 1)) / cols;
     const cellH = (cellW / w) * h;
 
+    const needsQr = template === 'qr-text' || template === 'qr-only' || template === 'qr-barcode';
+    const needsBarcode = template === 'barcode' || template === 'qr-barcode';
+
+    // Scan-size guard: warn if the QR will print too small to scan reliably
+    if (needsQr) {
+      let maxMod = 0;
+      for (const item of selected) {
+        const m = this._estimateQrModules(this._qrPayload(item.ref));
+        if (m > maxMod) maxMod = m;
+      }
+      if (maxMod > 0) {
+        const qrMm = template === 'qr-only' ? Math.min(cellW, cellH) * 0.8
+          : (template === 'qr-barcode' ? cellH * 0.6 : cellH * 0.65);
+        const modMm = qrMm / (maxMod + 8);
+        if (modMm < 0.2) {
+          if (!confirm(`The ${w}×${h}mm label prints QRs at ~${modMm.toFixed(2)}mm per module, which may be too small to scan reliably. Use a larger label or fewer columns.\n\nContinue anyway?`)) return;
+        }
+      }
+    }
+
     const qrDataUrls = [];
     const barcodeUrls = [];
 
-    if (template === 'barcode') {
+    if (needsBarcode) {
       if (typeof JsBarcode === 'undefined') { this._toast('Barcode library not loaded (check connection)'); return; }
       for (const item of selected) {
         try {
           const c = document.createElement('canvas');
-          JsBarcode(c, item.ref, { format: 'CODE128', width: 1, height: 30, displayValue: false, margin: 1 });
+          JsBarcode(c, item.ref, { format: 'CODE128', width: 1, height: 24, displayValue: false, margin: 10 });
           barcodeUrls.push(c.toDataURL('image/png'));
         } catch (e) { barcodeUrls.push(null); }
       }
-    } else if (template !== 'text-only') {
+    }
+
+    if (needsQr) {
       for (const item of selected) {
         try {
-          const dataUrl = await QRCode.toDataURL(item.ref, { width: 200, margin: 0, color: { dark: '#000', light: '#fff' } });
+          const dataUrl = await QRCode.toDataURL(this._qrPayload(item.ref), { width: 600, margin: 4, errorCorrectionLevel: 'H', color: { dark: '#000000', light: '#ffffff' } });
           qrDataUrls.push(dataUrl);
         } catch (e) { qrDataUrls.push(null); }
       }
@@ -1151,6 +1207,22 @@ const App = {
           const qrX = x + (cellW - qrSize) / 2;
           const qrY = y + (cellH - qrSize) / 2;
           doc.addImage(qrDataUrls[i], 'PNG', qrX, qrY, qrSize, qrSize);
+        }
+      } else if (template === 'qr-barcode') {
+        const qrSize = Math.min(cellH * 0.7, cellW * 0.4);
+        if (qrDataUrls[i]) {
+          doc.addImage(qrDataUrls[i], 'PNG', x + 2, y + (cellH - qrSize) / 2, qrSize, qrSize);
+        }
+        const tx = x + qrSize + 3;
+        const tw = cellW - qrSize - 5;
+        doc.setFontSize(Math.max(5, cellH * 0.22));
+        doc.setTextColor(0);
+        doc.text(item.ref, tx, y + cellH * 0.22, { maxWidth: tw });
+        doc.setFontSize(Math.max(3.5, cellH * 0.15));
+        doc.setTextColor(100);
+        doc.text(item.name.substring(0, 40), tx, y + cellH * 0.36, { maxWidth: tw });
+        if (barcodeUrls[i]) {
+          doc.addImage(barcodeUrls[i], 'PNG', tx, y + cellH * 0.62, tw, cellH * 0.3);
         }
       } else {
         const qrSize = cellH * 0.65;
